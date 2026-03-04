@@ -1,5 +1,5 @@
 # Gunakan Python 3.9 sebagai base image (sesuai README)
-FROM python:3.9-slim
+FROM python:3.11-slim
 
 # Set working directory di dalam container
 WORKDIR /app

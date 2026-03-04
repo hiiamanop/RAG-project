@@ -5,6 +5,8 @@ import logging
 from src.services.gdrive import GDriveService
 from src.services.rag import RAGService
 from src.database.repository import ChatRepository
+from src.core.agent import ChatAgent
+from src.utils.helpers import create_pdf
 import google.generativeai as genai
 from src.core.config import settings
 
@@ -24,7 +26,7 @@ if "user_id" not in st.session_state:
     st.session_state.user_id = str(uuid.uuid4())
 
 if "room_id" not in st.session_state:
-    st.session_state.room_id = "general"
+    st.session_state.room_id = str(uuid.uuid4())
 
 if "db" not in st.session_state:
     st.session_state.db = ChatRepository()
@@ -32,11 +34,11 @@ if "db" not in st.session_state:
 if "rag_service" not in st.session_state:
     st.session_state.rag_service = RAGService()
 
+if "agent" not in st.session_state:
+    st.session_state.agent = ChatAgent()
+
 if "gdrive_service" not in st.session_state:
-    # Initialize GDrive Service wrapper (lazy auth)
-    # We will instantiate it but auth might happen later or be reused
     st.session_state.gdrive_wrapper = GDriveService()
-    # Check if we are already authenticated by checking internal service
     if st.session_state.gdrive_wrapper.service:
         st.session_state.gdrive_connected = True
     else:
@@ -45,7 +47,11 @@ if "gdrive_service" not in st.session_state:
 if "indexed_file_ids" not in st.session_state:
     st.session_state.indexed_file_ids = set()
 
-if "messages" not in st.session_state:
+if "force_search" not in st.session_state:
+    st.session_state.force_search = None
+
+# Helper to load messages
+def load_messages():
     try:
         history = st.session_state.db.get_history(st.session_state.room_id)
         st.session_state.messages = [
@@ -56,8 +62,10 @@ if "messages" not in st.session_state:
         logger.error(f"Failed to load history: {e}")
         st.session_state.messages = []
 
+if "messages" not in st.session_state:
+    load_messages()
+
 def save_message(role, content):
-    """Save message to DB and session state"""
     st.session_state.messages.append({"role": role, "content": content})
     try:
         st.session_state.db.save_message(
@@ -70,7 +78,6 @@ def save_message(role, content):
         logger.error(f"Failed to save message: {e}")
 
 def extract_keywords_with_gemini(prompt):
-    """Uses Gemini to extract search keywords from a user prompt."""
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(
@@ -85,148 +92,238 @@ def extract_keywords_with_gemini(prompt):
         logger.error(f"Error extracting keywords: {e}")
         return prompt.split()
 
-# --- Sidebar ---
+def log_action(action, details=""):
+    logger.info(f"ANALYTICS: User {st.session_state.user_id} performed {action} | Details: {details}")
+
+# --- Sidebar: Chat Rooms ---
 with st.sidebar:
-    st.header("Status & Controls")
+    st.header("💬 Chats")
     
-    # Connection Status
-    if st.session_state.gdrive_connected:
-        st.success("✅ Connected to Google Drive")
-        if st.button("Reconnect / Switch Account"):
-            try:
-                if os.path.exists(settings.TOKEN_PATH):
-                    os.remove(settings.TOKEN_PATH)
-                # Re-init
-                st.session_state.gdrive_wrapper = GDriveService()
-                if st.session_state.gdrive_wrapper.service:
-                    st.session_state.gdrive_connected = True
-                    st.rerun()
-                else:
-                    st.error("Re-connection failed (Service is None)")
-            except Exception as e:
-                st.error(f"Re-connection failed: {e}")
-    else:
-        st.warning("⚠️ Not Connected")
-        if st.button("Connect to Google Drive"):
-            try:
-                # Force auth
-                st.session_state.gdrive_wrapper = GDriveService()
-                if st.session_state.gdrive_wrapper.service:
-                    st.session_state.gdrive_connected = True
-                    st.rerun()
-                else:
-                    st.error("Connection failed. Check logs.")
-            except Exception as e:
-                st.error(f"Connection failed: {e}")
-                st.info("Ensure 'credentials.json' is present.")
+    if st.button("➕ New Chat", use_container_width=True):
+        st.session_state.room_id = str(uuid.uuid4())
+        st.session_state.messages = []
+        st.rerun()
 
     st.markdown("---")
+    st.subheader("History")
     
-    # Indexed Files List
-    st.subheader(f"📚 Indexed Documents ({len(st.session_state.indexed_file_ids)})")
-    if st.session_state.indexed_file_ids:
-        if st.button("🗑️ Clear Index"):
-            st.session_state.rag_service.clear_index()
-            st.session_state.indexed_file_ids = set()
-            st.success("Memory cleared!")
-            st.rerun()
+    rooms = st.session_state.db.get_user_rooms(st.session_state.user_id)
+    
+    for room in rooms:
+        room_id = room["_id"]
+        title = room.get("first_message", "New Chat")
+        if title:
+            title = (title[:30] + '..') if len(title) > 30 else title
+        else:
+            title = "New Chat"
             
-        if st.button("📝 Summarize Context"):
-             with st.spinner("Summarizing all indexed content..."):
-                try:
-                    summary = st.session_state.rag_service.summarize()
-                    save_message("assistant", f"**Context Summary:**\n\n{summary}")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error: {e}")
-    else:
-        st.info("No documents indexed yet. Ask a question to start searching!")
+        if room_id == st.session_state.room_id:
+            st.button(f"👉 {title}", key=room_id, disabled=True, use_container_width=True)
+        else:
+            if st.button(f"🗨️ {title}", key=room_id, use_container_width=True):
+                st.session_state.room_id = room_id
+                load_messages()
+                st.rerun()
 
-# --- Chat Logic ---
-st.subheader("Chat")
+# --- Main Chat Interface ---
 
-for message in st.session_state.messages:
+# Display chat history
+for i, message in enumerate(st.session_state.messages):
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
+        
+        # Action Cards for Assistant messages
+        if message["role"] == "assistant":
+            # Identify the corresponding query (simple heuristic: preceding message)
+            query = ""
+            if i > 0 and st.session_state.messages[i-1]["role"] == "user":
+                query = st.session_state.messages[i-1]["content"]
+                # If the user message was a forced search (starts with "🔄 *Force Internet Search:* "), clean it
+                if query.startswith("🔄 *Force Internet Search:* "):
+                    query = query.replace("🔄 *Force Internet Search:* ", "")
 
-if prompt := st.chat_input("Tanyakan sesuatu (saya akan cari file relevan di Drive)..."):
-    save_message("user", prompt)
-    with st.chat_message("user"):
-        st.markdown(prompt)
+            col1, col2, col3 = st.columns([1, 1, 1])
+            with col1:
+                 st.download_button(
+                     label="⬇️ Markdown",
+                     data=message["content"],
+                     file_name=f"response_{i}.md",
+                     mime="text/markdown",
+                     key=f"md_{i}",
+                     on_click=log_action,
+                     args=("download_markdown", f"msg_{i}")
+                 )
+            with col2:
+                 if st.button("🌐 Cari di Internet", key=f"web_{i}"):
+                     log_action("force_internet_search", f"msg_{i}")
+                     if query:
+                         st.session_state.force_search = query
+                         st.rerun()
+                     else:
+                         st.warning("Query not found for this message.")
+            with col3:
+                 try:
+                     pdf_bytes = create_pdf(message["content"])
+                     st.download_button(
+                         label="📄 PDF",
+                         data=pdf_bytes,
+                         file_name=f"response_{i}.pdf",
+                         mime="application/pdf",
+                         key=f"pdf_{i}",
+                         on_click=log_action,
+                         args=("download_pdf", f"msg_{i}")
+                     )
+                 except Exception as e:
+                     st.error(f"PDF Error: {e}")
+
+
+# Chat Input
+user_input = st.chat_input("Tanyakan sesuatu...")
+
+# Determine if we have a prompt to process (User input or Forced Search)
+prompt = None
+is_forced_internet = False
+
+if st.session_state.force_search:
+    prompt = st.session_state.force_search
+    st.session_state.force_search = None
+    is_forced_internet = True
+elif user_input:
+    prompt = user_input
+    is_forced_internet = False
+
+if prompt:
+    # Display and Save User Message
+    if is_forced_internet:
+        display_text = f"🔄 *Force Internet Search:* {prompt}"
+        save_message("user", display_text)
+        with st.chat_message("user"):
+            st.markdown(display_text)
+    else:
+        save_message("user", prompt)
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
     with st.chat_message("assistant"):
         status_container = st.status("🤔 Memproses...", expanded=True)
         
         try:
-            # 1. Check Connection
-            if not st.session_state.gdrive_connected:
-                status_container.error("Please connect to Google Drive first!")
-                st.stop()
+            # DECISION ENGINE
+            search_keywords = []
             
-            # 2. Search in Drive
-            status_container.write(f"🔍 Mencari dokumen relevan untuk: '{prompt}'...")
-            
-            # Step 1: Extract keywords
-            search_keywords = extract_keywords_with_gemini(prompt)
-            status_container.write(f"🔑 Keywords: {', '.join(search_keywords)}")
-            
-            # Step 2: Search
-            gdrive = st.session_state.gdrive_wrapper
-            found_files = gdrive.search_files(search_keywords, limit=5)
-            
-            # Step 3: Fallback
-            if not found_files and len(search_keywords) > 1:
-                status_container.write("⚠️ Pencarian spesifik nihil, mencoba pencarian lebih luas...")
-                broad_files = []
-                for kw in search_keywords:
-                    res = gdrive.search_files(kw, limit=2)
-                    broad_files.extend(res)
+            if is_forced_internet:
+                pipeline = 'internet'
+                status_container.write("🔄 Mode: Forced Internet Search")
+            else:
+                # Use new NLP-based intent analysis
+                analysis = st.session_state.agent.analyze_intent(prompt)
+                pipeline = analysis.get("pipeline", "llm")
+                search_keywords = analysis.get("keywords", [])
+                confidence = analysis.get("confidence", 0.0)
                 
-                seen_ids = set()
-                for f in broad_files:
-                    if f['id'] not in seen_ids:
-                        found_files.append(f)
-                        seen_ids.add(f['id'])
+                status_container.write(f"🧠 Intent Analysis: {pipeline.upper()} (Confidence: {confidence:.2f})")
+                if search_keywords:
+                    status_container.write(f"🔑 Keywords: {', '.join(search_keywords)}")
+
+            response_text = ""
+            source = ""
             
-            if not found_files:
-                status_container.warning("Tidak ditemukan dokumen yang relevan di Google Drive.")
-                if not st.session_state.indexed_file_ids:
-                    response = "Maaf, saya tidak menemukan dokumen yang relevan dengan pertanyaan Anda di Google Drive, dan belum ada dokumen yang saya ingat."
-                    st.markdown(response)
-                    save_message("assistant", response)
-                    status_container.update(label="Selesai", state="complete", expanded=False)
-                    st.stop()
-            
-            # 3. Download & Index
-            new_files_to_index = []
-            for f in found_files:
-                if f['id'] not in st.session_state.indexed_file_ids:
-                    status_container.write(f"⬇️ Mengunduh: {f['name']}...")
-                    try:
-                        file_path = gdrive.download_file(f['id'], f['name'], f['mimeType'])
-                        if file_path:
-                            new_files_to_index.append(file_path)
-                            st.session_state.indexed_file_ids.add(f['id'])
-                        else:
-                            status_container.warning(f"⚠️ Format file tidak didukung: {f['name']}")
-                    except Exception as e:
-                        logger.error(f"Error downloading {f['name']}: {e}")
-                        status_container.warning(f"Gagal mengunduh {f['name']}.")
+            # --- PIPELINE 1: DRIVE SEARCH ---
+            if pipeline == 'drive':
+                status_container.write("📂 Pipeline: Google Drive Search")
+                
+                # Check Connection
+                if not st.session_state.gdrive_connected:
+                    status_container.warning("⚠️ Google Drive not connected. Checking internal memory...")
+                    pipeline = 'llm'
                 else:
-                    status_container.write(f"✅ Sudah ada di memori: {f['name']}")
-            
-            if new_files_to_index:
-                status_container.write(f"🧠 Membaca {len(new_files_to_index)} dokumen baru...")
-                st.session_state.rag_service.index_files(new_files_to_index)
-            
-            # 4. Generate Answer
-            status_container.write("✨ Menyusun jawaban...")
-            response = st.session_state.rag_service.ask(prompt)
-            
+                    status_container.write(f"🔍 Mencari dokumen relevan...")
+                    
+                    # Use keywords from analysis if available, otherwise fallback
+                    if not search_keywords:
+                         search_keywords = extract_keywords_with_gemini(prompt)
+
+                    gdrive = st.session_state.gdrive_wrapper
+                    found_files = gdrive.search_files(search_keywords, limit=5)
+                    
+                    # Fallback broad search
+                    if not found_files and len(search_keywords) > 1:
+                        status_container.write("⚠️ Pencarian spesifik nihil, mencoba pencarian luas...")
+                        for kw in search_keywords:
+                            res = gdrive.search_files(kw, limit=2)
+                            found_files.extend(res)
+                            
+                    # Process Found Files
+                    if found_files:
+                        new_files = []
+                        for f in found_files:
+                            if f['id'] not in st.session_state.indexed_file_ids:
+                                status_container.write(f"⬇️ Mengunduh: {f['name']}...")
+                                path = gdrive.download_file(f['id'], f['name'], f['mimeType'])
+                                if path:
+                                    new_files.append(path)
+                                    st.session_state.indexed_file_ids.add(f['id'])
+                        
+                        if new_files:
+                            status_container.write(f"🧠 Membaca {len(new_files)} dokumen baru...")
+                            st.session_state.rag_service.index_files(new_files)
+                            
+                        status_container.write("✨ Menyusun jawaban dari dokumen...")
+                        response_text = st.session_state.rag_service.ask(prompt)
+                        source = "drive"
+                    else:
+                        status_container.warning("❌ Tidak ditemukan dokumen relevan di Drive.")
+                        pipeline = 'internet'
+
+            # --- PIPELINE 2: LLM NATIVE ---
+            if pipeline == 'llm':
+                status_container.write("🤖 Pipeline: Knowledge Base Internal")
+                answer, confidence = st.session_state.agent.generate_native_response(prompt)
+                
+                status_container.write(f"📊 Confidence Score: {confidence:.2f}")
+                
+                if confidence < settings.LLM_CONFIDENCE_THRESHOLD:
+                    status_container.warning("⚠️ Confidence rendah. Beralih ke pencarian internet...")
+                    pipeline = 'internet'
+                else:
+                    response_text = answer
+                    source = "llm"
+
+            # --- PIPELINE 3: INTERNET SEARCH ---
+            if pipeline == 'internet':
+                status_container.write("🌐 Pipeline: Internet Search")
+                answer, results = st.session_state.agent.generate_internet_response(prompt)
+                response_text = answer
+                source = "internet"
+                
+                if results:
+                    with st.expander("📚 Sumber Internet"):
+                        for r in results:
+                            st.write(f"- [{r['title']}]({r['href']})")
+
             status_container.update(label="Selesai!", state="complete", expanded=False)
             
-            st.markdown(response)
-            save_message("assistant", response)
+            st.markdown(response_text)
+            save_message("assistant", response_text)
+            
+            # Action Cards for this new message (Immediate feedback)
+            col1, col2, col3 = st.columns([1, 1, 1])
+            with col1:
+                 st.download_button("⬇️ Markdown", response_text, "response_new.md", "text/markdown", key="md_new", on_click=log_action, args=("download_markdown", "new_msg"))
+            with col2:
+                 # Logic for immediate rerun is tricky with keys, but we can try.
+                 # If user clicks this, it will rerun. 
+                 # 'prompt' will be None. 'force_search' will be set.
+                 if st.button("🌐 Cari di Internet", key="web_new"):
+                     log_action("force_internet_search", "new_msg")
+                     st.session_state.force_search = prompt
+                     st.rerun()
+            with col3:
+                 try:
+                     pdf_bytes = create_pdf(response_text)
+                     st.download_button("📄 PDF", pdf_bytes, "response_new.pdf", "application/pdf", key="pdf_new", on_click=log_action, args=("download_pdf", "new_msg"))
+                 except Exception as e:
+                     st.error(f"PDF Error: {e}")
 
         except Exception as e:
             status_container.error(f"Terjadi kesalahan: {e}")

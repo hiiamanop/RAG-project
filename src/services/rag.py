@@ -17,6 +17,7 @@ from haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever
 from haystack.components.builders import PromptBuilder
 from haystack_integrations.components.generators.google_ai import GoogleAIGeminiGenerator
 from haystack.dataclasses import ByteStream
+from haystack.utils import Secret
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -182,7 +183,7 @@ class RAGService:
         
         # Gemini Generator
         # Using 'gemini-2.5-flash' which is the latest available model for the key
-        generator = GoogleAIGeminiGenerator(model="gemini-2.5-flash", api_key=settings.GOOGLE_API_KEY)
+        generator = GoogleAIGeminiGenerator(model="gemini-2.5-flash", api_key=Secret.from_token(settings.GOOGLE_API_KEY))
         
         # Pipeline connection
         self.rag_pipeline.add_component("text_embedder", text_embedder)

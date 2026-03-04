@@ -83,6 +83,26 @@ class ChatRepository:
         
         return list(cursor)
 
+    def get_user_rooms(self, user_id: str) -> List[Dict]:
+        """
+        Get list of chat rooms for a user, sorted by last activity.
+        """
+        if self.collection is None:
+            return []
+
+        pipeline = [
+            {"$match": {"user_id": user_id, "is_deleted": False}},
+            {"$sort": {"timestamp": ASCENDING}},  # Ensure we get the actual first message
+            {"$group": {
+                "_id": "$room_id",
+                "last_message_at": {"$max": "$timestamp"},
+                "first_message": {"$first": "$content"}
+            }},
+            {"$sort": {"last_message_at": DESCENDING}}
+        ]
+        
+        return list(self.collection.aggregate(pipeline))
+
     def soft_delete_message(self, message_id: str) -> bool:
         """
         Soft delete a message by setting is_deleted=True.

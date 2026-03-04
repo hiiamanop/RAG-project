@@ -18,6 +18,7 @@ client_secret.json
 
 # Local Data
 downloads/
+docs/
 data/
 *.log
 
