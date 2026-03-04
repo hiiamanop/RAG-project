@@ -55,7 +55,41 @@ streamlit run app.py
 ```
 Aplikasi akan terbuka otomatis di browser (biasanya di `http://localhost:8501`).
 
-## 💡 Cara Menggunakan
+## 🐳 Cara Menjalankan dengan Docker (Rekomendasi)
+
+Jika Anda ingin menjalankan aplikasi tanpa ribet install dependencies Python dan database manual, gunakan Docker.
+
+### Prasyarat Docker
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) sudah terinstall.
+- File `credentials.json` sudah ada di folder proyek (lihat langkah 5 Instalasi Manual).
+- File `.env` sudah ada dan berisi `GOOGLE_API_KEY`.
+
+### Langkah-langkah Docker
+
+1. **Jalankan Aplikasi:**
+   ```bash
+   docker-compose up --build
+   ```
+   Perintah ini akan membangun image aplikasi, mendownload MongoDB, dan menjalankan keduanya.
+
+2. **Akses Aplikasi:**
+   Buka browser di `http://localhost:8501`.
+
+3. **Login Google Drive:**
+   Saat pertama kali dijalankan di Docker, Anda perlu melakukan otentikasi.
+   - Klik tombol "Connect".
+   - Jika browser tidak otomatis terbuka atau redirect localhost gagal (karena di dalam container), periksa log terminal docker untuk link otentikasi.
+   - **Tips:** Untuk pengalaman terbaik, jalankan dulu aplikasi secara lokal sekali (`streamlit run app.py`) untuk generate `token.pickle`, lalu file tersebut akan otomatis di-mount ke Docker.
+
+4. **Menghentikan Aplikasi:**
+   Tekan `Ctrl+C` di terminal atau jalankan:
+   ```bash
+   docker-compose down
+   ```
+
+---
+
+## 💡 Cara Menggunakan (Manual)
 1. Klik tombol **Connect to Google Drive** di sidebar.
 2. Login dengan akun Google Anda dan berikan izin akses.
 3. Ketik pertanyaan Anda di kolom chat (contoh: "Carikan laporan keuangan bulan lalu").

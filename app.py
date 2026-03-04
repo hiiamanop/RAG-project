@@ -2,6 +2,8 @@ import streamlit as st
 import os
 import gdrive_utils
 from rag_pipeline import RAGPipeline
+from chat_database import ChatDatabase
+import uuid
 
 st.set_page_config(page_title="GDrive Chatbot", layout="wide")
 
@@ -13,6 +15,48 @@ from dotenv import load_dotenv
 load_dotenv()
 if "GOOGLE_API_KEY" in os.environ:
     genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
+
+# --- Initialization ---
+if "user_id" not in st.session_state:
+    st.session_state.user_id = str(uuid.uuid4())
+
+if "room_id" not in st.session_state:
+    st.session_state.room_id = "general" # Default room
+
+if "db" not in st.session_state:
+    # Initialize DB (will use mock if no URI provided, safe for demo)
+    st.session_state.db = ChatDatabase()
+
+if "rag_pipeline" not in st.session_state:
+    st.session_state.rag_pipeline = RAGPipeline()
+
+if "indexed_file_ids" not in st.session_state:
+    st.session_state.indexed_file_ids = set()
+
+if "messages" not in st.session_state:
+    # Load history from DB
+    try:
+        history = st.session_state.db.get_history(st.session_state.room_id)
+        st.session_state.messages = [
+            {"role": msg["role"], "content": msg["content"]} 
+            for msg in history
+        ]
+    except Exception as e:
+        print(f"Failed to load history: {e}")
+        st.session_state.messages = []
+
+def save_message(role, content):
+    """Save message to DB and session state"""
+    st.session_state.messages.append({"role": role, "content": content})
+    try:
+        st.session_state.db.save_message(
+            user_id=st.session_state.user_id,
+            room_id=st.session_state.room_id,
+            role=role,
+            content=content
+        )
+    except Exception as e:
+        print(f"Failed to save message: {e}")
 
 def extract_keywords_with_gemini(prompt):
     """Uses Gemini to extract search keywords from a user prompt."""
@@ -31,16 +75,6 @@ def extract_keywords_with_gemini(prompt):
         print(f"Error extracting keywords: {e}")
         # Fallback: Simple split
         return prompt.split()
-
-# --- Initialization ---
-if "rag_pipeline" not in st.session_state:
-    st.session_state.rag_pipeline = RAGPipeline()
-
-if "indexed_file_ids" not in st.session_state:
-    st.session_state.indexed_file_ids = set()
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
 
 # --- Authentication & Connection ---
 if "gdrive_service" not in st.session_state:
@@ -95,7 +129,7 @@ with st.sidebar:
              with st.spinner("Summarizing all indexed content..."):
                 try:
                     summary = st.session_state.rag_pipeline.summarize()
-                    st.session_state.messages.append({"role": "assistant", "content": f"**Context Summary:**\n\n{summary}"})
+                    save_message("assistant", f"**Context Summary:**\n\n{summary}")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error: {e}")
@@ -113,7 +147,7 @@ for message in st.session_state.messages:
 # Input handling
 if prompt := st.chat_input("Tanyakan sesuatu (saya akan cari file relevan di Drive)..."):
     # Add user message
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    save_message("user", prompt)
     with st.chat_message("user"):
         st.markdown(prompt)
 
@@ -159,7 +193,7 @@ if prompt := st.chat_input("Tanyakan sesuatu (saya akan cari file relevan di Dri
                 if not st.session_state.indexed_file_ids:
                     response = "Maaf, saya tidak menemukan dokumen yang relevan dengan pertanyaan Anda di Google Drive, dan belum ada dokumen yang saya ingat."
                     st.markdown(response)
-                    st.session_state.messages.append({"role": "assistant", "content": response})
+                    save_message("assistant", response)
                     status_container.update(label="Selesai", state="complete", expanded=False)
                     st.stop()
             
@@ -192,7 +226,7 @@ if prompt := st.chat_input("Tanyakan sesuatu (saya akan cari file relevan di Dri
             status_container.update(label="Selesai!", state="complete", expanded=False)
             
             st.markdown(response)
-            st.session_state.messages.append({"role": "assistant", "content": response})
+            save_message("assistant", response)
 
         except Exception as e:
             status_container.error(f"Terjadi kesalahan: {e}")

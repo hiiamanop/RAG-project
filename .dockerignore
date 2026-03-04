@@ -1,0 +1,35 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Environment Variables & Secrets (Prevent baking secrets into image)
+.env
+credentials.json
+token.pickle
+client_secret.json
+
+# Local Data
+downloads/
+data/
+*.log
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+
+# Docker
+Dockerfile
+docker-compose.yml

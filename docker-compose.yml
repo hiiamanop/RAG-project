@@ -1,0 +1,44 @@
+services:
+  # Layanan Aplikasi Chatbot
+  app:
+    build: .
+    container_name: gdrive-chatbot-app
+    ports:
+      - "8501:8501"
+    environment:
+      # Pass API Key dari host environment
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      # Koneksi ke layanan MongoDB di dalam network docker
+      - MONGODB_URI=mongodb://mongodb:27017/gdrive_chatbot
+    volumes:
+      # Mount file credentials.json agar bisa dibaca aplikasi
+      - ./credentials.json:/app/credentials.json
+      # Mount token.pickle untuk persistensi login (jika ada)
+      # Jika belum ada, docker akan membuatnya sebagai direktori, jadi perlu trik atau biarkan user generate lokal dulu
+      - ./token.pickle:/app/token.pickle
+      # Mount folder downloads agar file hasil unduhan bisa diakses di host (opsional)
+      - ./downloads:/app/downloads
+    depends_on:
+      - mongodb
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # Layanan Database MongoDB
+  mongodb:
+    image: mongo:latest
+    container_name: gdrive-chatbot-mongo
+    ports:
+      - "27017:27017" # Expose ke host jika ingin diakses via Mongo Compass/Tools
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - app-network
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+
+networks:
+  app-network:
+    driver: bridge
