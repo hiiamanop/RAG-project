@@ -18,4 +18,9 @@ def create_pdf(text: str) -> bytes:
     clean_text = clean_text.encode('latin-1', 'replace').decode('latin-1')
     
     pdf.multi_cell(0, 10, txt=clean_text)
-    return pdf.output(dest='S').encode('latin-1')
+    
+    # fpdf2 output(dest='S') returns a bytearray in newer versions
+    output = pdf.output(dest='S')
+    if isinstance(output, bytearray):
+        return bytes(output)
+    return output.encode('latin-1')

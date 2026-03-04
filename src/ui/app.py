@@ -144,34 +144,37 @@ for i, message in enumerate(st.session_state.messages):
 
             col1, col2, col3 = st.columns([1, 1, 1])
             with col1:
-                 st.download_button(
-                     label="⬇️ Markdown",
-                     data=message["content"],
-                     file_name=f"response_{i}.md",
-                     mime="text/markdown",
-                     key=f"md_{i}",
-                     on_click=log_action,
-                     args=("download_markdown", f"msg_{i}")
-                 )
+                 # Removed Markdown button
+                 pass
             with col2:
-                 if st.button("🌐 Cari di Internet", key=f"web_{i}"):
+                 # Center the remaining buttons using a container or columns
+                 pass
+            
+            # New Centered Layout for Action Cards
+            st.markdown("---") # Optional separator
+            c1, c2, c3, c4 = st.columns([2, 3, 3, 2])
+            
+            with c2:
+                 if st.button("🌐 Cari di Internet", key=f"web_{i}", use_container_width=True):
                      log_action("force_internet_search", f"msg_{i}")
                      if query:
                          st.session_state.force_search = query
                          st.rerun()
                      else:
                          st.warning("Query not found for this message.")
-            with col3:
+            
+            with c3:
                  try:
                      pdf_bytes = create_pdf(message["content"])
                      st.download_button(
-                         label="📄 PDF",
+                         label="📄 Convert ke PDF",
                          data=pdf_bytes,
                          file_name=f"response_{i}.pdf",
                          mime="application/pdf",
                          key=f"pdf_{i}",
                          on_click=log_action,
-                         args=("download_pdf", f"msg_{i}")
+                         args=("download_pdf", f"msg_{i}"),
+                         use_container_width=True
                      )
                  except Exception as e:
                      st.error(f"PDF Error: {e}")
@@ -307,21 +310,28 @@ if prompt:
             save_message("assistant", response_text)
             
             # Action Cards for this new message (Immediate feedback)
-            col1, col2, col3 = st.columns([1, 1, 1])
-            with col1:
-                 st.download_button("⬇️ Markdown", response_text, "response_new.md", "text/markdown", key="md_new", on_click=log_action, args=("download_markdown", "new_msg"))
-            with col2:
-                 # Logic for immediate rerun is tricky with keys, but we can try.
-                 # If user clicks this, it will rerun. 
-                 # 'prompt' will be None. 'force_search' will be set.
-                 if st.button("🌐 Cari di Internet", key="web_new"):
+            st.markdown("---")
+            c1, c2, c3, c4 = st.columns([2, 3, 3, 2])
+            
+            with c2:
+                 if st.button("🌐 Cari di Internet", key="web_new", use_container_width=True):
                      log_action("force_internet_search", "new_msg")
                      st.session_state.force_search = prompt
                      st.rerun()
-            with col3:
+            
+            with c3:
                  try:
                      pdf_bytes = create_pdf(response_text)
-                     st.download_button("📄 PDF", pdf_bytes, "response_new.pdf", "application/pdf", key="pdf_new", on_click=log_action, args=("download_pdf", "new_msg"))
+                     st.download_button(
+                         label="📄 PDF", 
+                         data=pdf_bytes, 
+                         file_name="response_new.pdf", 
+                         mime="application/pdf", 
+                         key="pdf_new", 
+                         on_click=log_action, 
+                         args=("download_pdf", "new_msg"),
+                         use_container_width=True
+                     )
                  except Exception as e:
                      st.error(f"PDF Error: {e}")
 
