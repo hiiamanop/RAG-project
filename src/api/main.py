@@ -1,15 +1,16 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, APIRouter
 from pydantic import BaseModel
-from typing import List, Optional
-from chat_database import ChatDatabase
-import os
+from typing import List, Dict, Optional
+from src.database.repository import ChatRepository
+from src.core.config import settings
 
-app = FastAPI(title="Chat History API", description="API for managing chat history with MongoDB")
+app = FastAPI(
+    title=settings.APP_NAME, 
+    description="API for managing chat history with MongoDB"
+)
 
-# Initialize DB (expecting MONGODB_URI in env or defaults)
-# For demo purposes, if no URI, we might fail or use a default.
-# Ensure MONGODB_URI is set in .env before running.
-db = ChatDatabase()
+# Initialize DB
+db = ChatRepository()
 
 class MessageCreate(BaseModel):
     user_id: str

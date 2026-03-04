@@ -22,6 +22,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy seluruh kode aplikasi
 COPY . .
 
+# Set PYTHONPATH agar modul src bisa ditemukan
+ENV PYTHONPATH=/app
+
 # Buat direktori untuk downloads agar permission-nya benar
 RUN mkdir -p downloads
 
@@ -32,4 +35,4 @@ EXPOSE 8501
 HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health || exit 1
 
 # Command untuk menjalankan aplikasi
-ENTRYPOINT ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+ENTRYPOINT ["streamlit", "run", "src/ui/app.py", "--server.port=8501", "--server.address=0.0.0.0"]

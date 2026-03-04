@@ -10,6 +10,7 @@ services:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       # Koneksi ke layanan MongoDB di dalam network docker
       - MONGODB_URI=mongodb://mongodb:27017/gdrive_chatbot
+      - PYTHONPATH=/app
     volumes:
       # Mount file credentials.json agar bisa dibaca aplikasi
       - ./credentials.json:/app/credentials.json

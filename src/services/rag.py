@@ -1,4 +1,10 @@
 import os
+import pandas as pd
+from typing import List, Union
+from pathlib import Path
+import io
+import logging
+
 from haystack import Pipeline, component, Document
 from haystack.document_stores.in_memory import InMemoryDocumentStore
 from haystack.components.converters import PyPDFToDocument, TextFileToDocument
@@ -10,13 +16,10 @@ from haystack.components.embedders import SentenceTransformersDocumentEmbedder, 
 from haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever
 from haystack.components.builders import PromptBuilder
 from haystack_integrations.components.generators.google_ai import GoogleAIGeminiGenerator
-from dotenv import load_dotenv
-import pandas as pd
-from typing import List, Union
-from pathlib import Path
 from haystack.dataclasses import ByteStream
+from src.core.config import settings
 
-load_dotenv()
+logger = logging.getLogger(__name__)
 
 @component
 class TableToDocument:
@@ -30,9 +33,7 @@ class TableToDocument:
             try:
                 # Handle different input types
                 if isinstance(source, ByteStream):
-                    import io
                     # For ByteStream, we need to handle bytes directly
-                    # pandas read_csv/read_excel can take bytes
                     source_data = io.BytesIO(source.data)
                     file_path = source.meta.get("file_path", "unknown")
                     file_name = source.meta.get("name", "unknown")
@@ -57,7 +58,6 @@ class TableToDocument:
                         except ImportError:
                             content = chunk.to_string(index=False)
                         
-                        # Add context header to every chunk
                         full_content = f"File: {file_name}\nFormat: CSV\n\n{content}"
                         documents.append(Document(content=full_content, meta={"file_path": file_path, "name": file_name, "row_start": i}))
                 else:
@@ -78,10 +78,10 @@ class TableToDocument:
                             documents.append(Document(content=full_content, meta={"file_path": file_path, "name": file_name, "sheet": sheet_name, "row_start": i}))
                     
             except Exception as e:
-                print(f"Error converting table file {source}: {e}")
+                logger.error(f"Error converting table file {source}: {e}")
         return {"documents": documents}
 
-class RAGPipeline:
+class RAGService:
     def __init__(self):
         self.document_store = InMemoryDocumentStore()
         self.indexing_pipeline = Pipeline()
@@ -182,7 +182,7 @@ class RAGPipeline:
         
         # Gemini Generator
         # Using 'gemini-2.5-flash' which is the latest available model for the key
-        generator = GoogleAIGeminiGenerator(model="gemini-2.5-flash")
+        generator = GoogleAIGeminiGenerator(model="gemini-2.5-flash", api_key=settings.GOOGLE_API_KEY)
         
         # Pipeline connection
         self.rag_pipeline.add_component("text_embedder", text_embedder)
